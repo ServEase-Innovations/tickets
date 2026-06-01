@@ -1,0 +1,10 @@
+{
+  "watch": ["src", "prisma", "prisma.config.js", ".env", ".env.development"],
+  "ext": "js,json,prisma,env",
+  "ignore": ["node_modules", "prisma/migrations/**/migration_lock.toml"],
+  "exec": "node src/server.js",
+  "env": {
+    "NODE_ENV": "development"
+  },
+  "delay": "400"
+}

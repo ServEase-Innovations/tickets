@@ -1,5 +1,7 @@
 import pool from "../config/db.js";
 import { DEFAULT_SLA_HOURS, DEFAULT_ADMIN_EMAIL } from "../config/env.js";
+import { notifyCustomerSupportTicketUpdate } from "./notifyCustomer.js";
+import { notifyAdminSupportTicketActivity } from "./notifyAdmin.js";
 
 const STATUSES = ["OPEN", "IN_PROGRESS", "WAITING_CUSTOMER", "RESOLVED", "CLOSED", "CANCELLED"];
 const PRIORITIES = ["LOW", "MEDIUM", "HIGH"];
@@ -117,11 +119,11 @@ export async function createTicket({
       `INSERT INTO support_tickets (
         ticket_number, customerid, engagement_id, serviceproviderid,
         category, subject, description, status, priority,
-        sla_hours, sla_due_at
+        assigned_admin_email, sla_hours, sla_due_at
       ) VALUES (
         $1, $2, $3, $4,
         $5, $6, $7, 'OPEN', $8,
-        $9, NOW() + ($9::text || ' hours')::interval
+        $9, $10, NOW() + ($10::int * INTERVAL '1 hour')
       )
       RETURNING *`,
       [
@@ -133,6 +135,7 @@ export async function createTicket({
         subject.trim(),
         description.trim(),
         effectivePriority,
+        DEFAULT_ADMIN_EMAIL,
         slaHours,
       ]
     );
@@ -144,7 +147,13 @@ export async function createTicket({
     );
     await logEvent(client, ticket.ticket_id, "CREATED", { sla_hours: slaHours, priority: effectivePriority }, "customer");
     await client.query("COMMIT");
-    return await getTicketById(ticket.ticket_id);
+    const created = await getTicketById(ticket.ticket_id);
+    void notifyAdminSupportTicketActivity({
+      ticket: created,
+      reason: "new_ticket",
+      preview: `${created.ticket_number}: ${created.subject}`,
+    });
+    return created;
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;
@@ -168,7 +177,7 @@ export async function getTicketById(ticketId, { includeInternalComments = false 
   const comments = await pool.query(
     `SELECT * FROM support_ticket_comments
      WHERE ticket_id = $1
-       AND ($2::boolean = true OR is_internal = false)
+       AND ($2::boolean IS TRUE OR COALESCE(is_internal, false) = false)
      ORDER BY created_at ASC`,
     [ticketId, includeInternalComments]
   );
@@ -317,7 +326,7 @@ export async function updateTicketAdmin(ticketId, updates, adminEmail) {
         priority = $3,
         assigned_admin_email = $4,
         sla_hours = $5,
-        sla_due_at = created_at + ($5::text || ' hours')::interval,
+        sla_due_at = created_at + ($5::int * INTERVAL '1 hour'),
         resolution_notes = $6,
         resolved_at = $7,
         resolved_by = $8,
@@ -334,6 +343,16 @@ export async function updateTicketAdmin(ticketId, updates, adminEmail) {
         resolvedBy,
       ]
     );
+    const notesChanged =
+      String(resolutionNotes || "").trim() !== String(existing.resolution_notes || "").trim();
+    if (notesChanged && String(resolutionNotes || "").trim()) {
+      await client.query(
+        `INSERT INTO support_ticket_comments (ticket_id, author_type, author_id, author_name, body, is_internal)
+         VALUES ($1, 'ADMIN', NULL, $2, $3, false)`,
+        [ticketId, adminEmail || "Support", String(resolutionNotes).trim()]
+      );
+    }
+
     await logEvent(
       client,
       ticketId,
@@ -342,7 +361,27 @@ export async function updateTicketAdmin(ticketId, updates, adminEmail) {
       adminEmail
     );
     await client.query("COMMIT");
-    return await getTicketById(ticketId, { includeInternalComments: true });
+    const updated = await getTicketById(ticketId, { includeInternalComments: true });
+    const statusChanged = status !== existing.status;
+    const newlyAssigned =
+      assigned &&
+      !existing.assigned_admin_email &&
+      String(assigned).trim() !== String(DEFAULT_ADMIN_EMAIL).trim();
+    if (statusChanged || notesChanged || newlyAssigned) {
+      const reason = ["RESOLVED", "CLOSED"].includes(status)
+        ? "resolved"
+        : newlyAssigned
+          ? "assigned"
+          : "status_change";
+      void notifyCustomerSupportTicketUpdate({
+        ticket: updated,
+        reason,
+        preview: notesChanged
+          ? String(resolutionNotes).slice(0, 240)
+          : `Status: ${status.replace(/_/g, " ")}`,
+      });
+    }
+    return updated;
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;
@@ -375,14 +414,32 @@ export async function addComment({
      VALUES ($1, $2, $3, $4, $5, $6)`,
     [ticketId, authorType, authorId, authorName, body.trim(), isInternal]
   );
-  if (authorType === "ADMIN" && ticket.status === "OPEN") {
+  if (authorType === "ADMIN" && !isInternal) {
     await pool.query(
-      `UPDATE support_tickets SET status = 'IN_PROGRESS', updated_at = NOW() WHERE ticket_id = $1`,
+      `UPDATE support_tickets SET status = 'WAITING_CUSTOMER', updated_at = NOW()
+       WHERE ticket_id = $1 AND status NOT IN ('RESOLVED', 'CLOSED', 'CANCELLED', 'WAITING_CUSTOMER')`,
       [ticketId]
     );
   }
   await pool.query(`UPDATE support_tickets SET updated_at = NOW() WHERE ticket_id = $1`, [ticketId]);
-  return getTicketById(ticketId, { includeInternalComments: authorType === "ADMIN" });
+  const updated = await getTicketById(ticketId, {
+    includeInternalComments: String(authorType).toUpperCase() === "ADMIN",
+  });
+  if (authorType === "ADMIN" && !isInternal) {
+    void notifyCustomerSupportTicketUpdate({
+      ticket: updated,
+      reason: "admin_reply",
+      preview: body.trim().slice(0, 240),
+    });
+  }
+  if (authorType === "CUSTOMER") {
+    void notifyAdminSupportTicketActivity({
+      ticket: updated,
+      reason: "customer_reply",
+      preview: body.trim().slice(0, 240),
+    });
+  }
+  return updated;
 }
 
 export { STATUSES, PRIORITIES, CATEGORIES, DEFAULT_SLA_HOURS };

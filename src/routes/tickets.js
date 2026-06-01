@@ -45,14 +45,24 @@ router.post("/", async (req, res) => {
       ticket,
     });
   } catch (e) {
-    const code = e.code || "SERVER_ERROR";
+    const pgCode = e.code;
+    const code =
+      pgCode === "42P01"
+        ? "SCHEMA_NOT_READY"
+        : e.code || "SERVER_ERROR";
     const status =
       code === "ENGAGEMENT_NOT_FOUND" || code === "CUSTOMER_MISMATCH"
         ? 400
         : code === "MISSING_REQUIRED_FIELDS"
           ? 400
-          : 500;
-    return res.status(status).json({ success: false, error: code, message: e.message });
+          : code === "SCHEMA_NOT_READY"
+            ? 503
+            : 500;
+    const message =
+      code === "SCHEMA_NOT_READY"
+        ? "Support ticket tables are missing. Run services/tickets/sql/schema.sql on the database."
+        : e.message;
+    return res.status(status).json({ success: false, error: code, message });
   }
 });
 

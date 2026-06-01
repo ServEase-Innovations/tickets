@@ -4,14 +4,22 @@
   "type": "module",
   "main": "src/server.js",
   "scripts": {
-    "dev": "NODE_ENV=development nodemon --ext js,json -w src -x node src/server.js",
-    "start": "node src/server.js"
+    "dev": "nodemon",
+    "start": "node src/server.js",
+    "postinstall": "prisma generate",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate deploy",
+    "prisma:push": "prisma db push",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "db:schema": "prisma migrate deploy"
   },
   "dependencies": {
+    "@prisma/client": "^7.5.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "pg": "^8.11.5"
+    "pg": "^8.11.5",
+    "prisma": "^7.5.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"

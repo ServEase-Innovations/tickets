@@ -8,15 +8,38 @@ Customer complaint / support ticketing API (port **5006** by default).
 cp .env.example .env.development
 # In the monorepo, Postgres vars are read from services/payments/.env.development
 # (same POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_PORT).
-# Only set PORT / SLA / ADMIN_TICKET_SECRET in services/tickets/.env.development unless deploying standalone.
-
-psql -h $POSTGRES_HOST -U $POSTGRES_USER -d $POSTGRES_DB -f sql/schema.sql
+# Set POSTGRES_DB=serveaso if empty in payments env.
 
 npm install
-npm run dev
+npm run dev   # nodemon — restarts on src/ and prisma/ changes
 ```
 
+Do **not** use `npm start` or `node src/server.js` during development (no auto-reload).
+
+**On every startup** the service runs **Prisma `migrate deploy`** so `support_tickets` and related tables exist or stay up to date. If the database already had those tables (manual SQL), it **baselines** the initial migration—it does **not** run `db push` (unsafe on the shared `serveaso` database).
+
 From monorepo root: `npm run dev` (includes tickets on port 5006) or `npm run dev:tickets`
+
+## Prisma
+
+| Command | Purpose |
+|---------|---------|
+| `npm run prisma:migrate` | Apply migrations (`migrate deploy`) |
+| `npm run prisma:push` | Sync schema without migration files (dev) |
+| `npm run prisma:migrate:dev` | Create a new migration after editing `prisma/schema.prisma` |
+| `npm run prisma:generate` | Regenerate client |
+
+Schema: `prisma/schema.prisma`  
+Migrations: `prisma/migrations/`  
+Legacy SQL reference: `sql/schema.sql`
+
+### Env
+
+| Variable | Purpose |
+|----------|---------|
+| `DATABASE_URL` | Optional; overrides `POSTGRES_*` for Prisma |
+| `PRISMA_SKIP_MIGRATE` | `true` to skip startup migrate |
+| `TICKETS_DB_PUSH` | Unused (db push disabled on shared DB); use `prisma:migrate:dev` for schema changes |
 
 ## API
 

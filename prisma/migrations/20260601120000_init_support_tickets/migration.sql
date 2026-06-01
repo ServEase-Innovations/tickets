@@ -1,6 +1,4 @@
--- Support ticketing (reference SQL — prefer Prisma migrations)
--- Prisma: npm run prisma:migrate  (or automatic on service startup)
--- Manual: psql -h HOST -U USER -d serveaso -f services/tickets/sql/schema.sql
+-- Initial support ticketing tables (also tracked in sql/schema.sql for reference)
 
 CREATE TABLE IF NOT EXISTS public.support_tickets (
   ticket_id BIGSERIAL PRIMARY KEY,
