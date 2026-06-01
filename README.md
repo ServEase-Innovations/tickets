@@ -16,21 +16,29 @@ npm run dev   # nodemon — restarts on src/ and prisma/ changes
 
 Do **not** use `npm start` or `node src/server.js` during development (no auto-reload).
 
-**On every startup** the service runs **Prisma `migrate deploy`** so `support_tickets` and related tables exist or stay up to date. If the database already had those tables (manual SQL), it **baselines** the initial migration—it does **not** run `db push` (unsafe on the shared `serveaso` database).
+**Schema is not applied on startup.** Run migrations from **[DB_Migrations](https://github.com/ServEase-Innovations/DB_Migrations)** first:
+
+```bash
+# monorepo root
+npm run db:install && npm run db:migrate
+```
 
 From monorepo root: `npm run dev` (includes tickets on port 5006) or `npm run dev:tickets`
 
-## Prisma
+## Prisma (client only in this service)
 
 | Command | Purpose |
 |---------|---------|
-| `npm run prisma:migrate` | Apply migrations (`migrate deploy`) |
-| `npm run prisma:push` | Sync schema without migration files (dev) |
-| `npm run prisma:migrate:dev` | Create a new migration after editing `prisma/schema.prisma` |
-| `npm run prisma:generate` | Regenerate client |
+| `npm run prisma:generate` | Regenerate client from `prisma/schema.prisma` |
 
-Schema: `prisma/schema.prisma`  
-Migrations: `prisma/migrations/`  
+**DDL / migrations** live in [`database/prisma/tickets/`](../../database/prisma/tickets/) (DB_Migrations repo). After editing schema there, copy to `prisma/schema.prisma` if needed for generate, or:
+
+```bash
+npx prisma generate --schema=../../database/prisma/tickets/schema.prisma
+```
+
+Do **not** run `prisma db push` or `migrate deploy` from this service against shared `serveaso`.
+
 Legacy SQL reference: `sql/schema.sql`
 
 ### Env
