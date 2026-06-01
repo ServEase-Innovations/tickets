@@ -4,7 +4,7 @@
   "type": "module",
   "main": "src/server.js",
   "scripts": {
-    "dev": "nodemon --ext js,json -w src -x node src/server.js",
+    "dev": "NODE_ENV=development nodemon --ext js,json -w src -x node src/server.js",
     "start": "node src/server.js"
   },
   "dependencies": {

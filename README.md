@@ -6,15 +6,17 @@ Customer complaint / support ticketing API (port **5006** by default).
 
 ```bash
 cp .env.example .env.development
-# Set POSTGRES_* and ADMIN_TICKET_SECRET (same value as utils ADMIN_PUSH_SECRET)
+# In the monorepo, Postgres vars are read from services/payments/.env.development
+# (same POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_PORT).
+# Only set PORT / SLA / ADMIN_TICKET_SECRET in services/tickets/.env.development unless deploying standalone.
 
-psql -h 127.0.0.1 -U $POSTGRES_USER -d serveaso -f sql/schema.sql
+psql -h $POSTGRES_HOST -U $POSTGRES_USER -d $POSTGRES_DB -f sql/schema.sql
 
 npm install
 npm run dev
 ```
 
-From monorepo root: `npm run dev:tickets`
+From monorepo root: `npm run dev` (includes tickets on port 5006) or `npm run dev:tickets`
 
 ## API
 
