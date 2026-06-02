@@ -72,6 +72,19 @@ Admin auth: headers `X-Admin-Ticket-Secret` (or `X-Admin-Push-Secret`) and optio
 - Admin can set priority `LOW` / `MEDIUM` / `HIGH` and extend SLA hours (recalculates `sla_due_at` from `created_at`).
 - Optional `engagementId` validated against `engagements` and customer ownership.
 
+## Epoch-first contract
+
+Ticket and comment payloads include epoch mirror fields for datetime values:
+
+- ticket: `sla_due_at_epoch`, `resolved_at_epoch`, `created_at_epoch`, `updated_at_epoch`
+- comment: `created_at_epoch`
+
+Request compatibility aliases supported:
+
+- customer endpoints accept `customerId` and `customer_id`
+- ticket create accepts `engagementId` and `engagement_id`
+- admin list accepts `assignedAdminEmail` and `assigned_admin_email`
+
 ## UI env
 
 - Web: `REACT_APP_TICKETS_URL`, `REACT_APP_ADMIN_TICKET_SECRET`

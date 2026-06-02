@@ -15,6 +15,13 @@ const CATEGORIES = [
   "APP_TECHNICAL",
 ];
 
+function toEpochSeconds(value) {
+  if (!value) return null;
+  const ms = new Date(value).getTime();
+  if (!Number.isFinite(ms)) return null;
+  return Math.floor(ms / 1000);
+}
+
 function mapTicket(row) {
   if (!row) return null;
   const now = Date.now();
@@ -38,12 +45,16 @@ function mapTicket(row) {
     assigned_admin_email: row.assigned_admin_email,
     sla_hours: Number(row.sla_hours),
     sla_due_at: row.sla_due_at,
+    sla_due_at_epoch: toEpochSeconds(row.sla_due_at),
     is_overdue: isOverdue,
     resolved_at: row.resolved_at,
+    resolved_at_epoch: toEpochSeconds(row.resolved_at),
     resolved_by: row.resolved_by,
     resolution_notes: row.resolution_notes,
     created_at: row.created_at,
+    created_at_epoch: toEpochSeconds(row.created_at),
     updated_at: row.updated_at,
+    updated_at_epoch: toEpochSeconds(row.updated_at),
     customer_name: row.customer_name || null,
     customer_mobile: row.customer_mobile || null,
   };
@@ -189,6 +200,7 @@ export async function getTicketById(ticketId, { includeInternalComments = false 
     body: c.body,
     is_internal: c.is_internal,
     created_at: c.created_at,
+    created_at_epoch: toEpochSeconds(c.created_at),
   }));
   return ticket;
 }

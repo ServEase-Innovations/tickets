@@ -39,7 +39,8 @@ router.get("/", async (req, res) => {
     const tickets = await listAdminTickets({
       status: req.query.status,
       priority: req.query.priority,
-      assignedAdminEmail: req.query.assignedAdminEmail,
+      assignedAdminEmail:
+        req.query.assignedAdminEmail ?? req.query.assigned_admin_email,
       overdueOnly: req.query.overdueOnly,
       search: req.query.search,
       limit: Number(req.query.limit) || 50,

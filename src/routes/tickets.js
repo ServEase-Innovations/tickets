@@ -12,7 +12,13 @@ import {
 const router = Router();
 
 function parseCustomerId(req) {
-  const id = Number(req.body?.customerId ?? req.query?.customerId ?? req.headers["x-customer-id"]);
+  const id = Number(
+    req.body?.customerId ??
+      req.body?.customer_id ??
+      req.query?.customerId ??
+      req.query?.customer_id ??
+      req.headers["x-customer-id"]
+  );
   return Number.isFinite(id) && id > 0 ? id : null;
 }
 
@@ -37,7 +43,12 @@ router.post("/", async (req, res) => {
       subject: req.body.subject,
       description: req.body.description,
       category: req.body.category,
-      engagementId: req.body.engagementId != null ? Number(req.body.engagementId) : null,
+      engagementId:
+        req.body.engagementId != null
+          ? Number(req.body.engagementId)
+          : req.body.engagement_id != null
+            ? Number(req.body.engagement_id)
+            : null,
     });
     return res.status(201).json({
       success: true,
