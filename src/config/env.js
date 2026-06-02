@@ -1,6 +1,10 @@
 import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
+import { createRequire } from "module";
+
+const require = createRequire(import.meta.url);
+const { syncPostgresDbAliases, requirePostgresDatabaseName } = require("../../../../scripts/postgres-env.cjs");
 
 const ENV = process.env.NODE_ENV || "development";
 
@@ -52,6 +56,8 @@ if (!fs.existsSync(ticketsEnvPath)) {
 }
 loadEnvFile(ticketsEnvPath, { override: true, skipEmpty: true });
 
+syncPostgresDbAliases(process.env);
+
 export const DEFAULT_SLA_HOURS = Number(process.env.TICKET_DEFAULT_SLA_HOURS) || 48;
 export const DEFAULT_ADMIN_EMAIL =
   (process.env.DEFAULT_TICKET_ADMIN_EMAIL || "admin@serveaso.com").trim();
@@ -72,7 +78,7 @@ export default {
     host: process.env.POSTGRES_HOST || "127.0.0.1",
     user: process.env.POSTGRES_USER,
     password: process.env.POSTGRES_PASSWORD,
-    database: (process.env.POSTGRES_DB || "").trim() || "serveaso",
+    database: requirePostgresDatabaseName(process.env),
     port: Number(process.env.POSTGRES_PORT) || 5432,
     poolMax: Number(process.env.POSTGRES_POOL_MAX) || 10,
     poolIdleTimeoutMs: Number(process.env.POSTGRES_POOL_IDLE_TIMEOUT_MS) || 60_000,

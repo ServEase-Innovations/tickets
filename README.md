@@ -8,7 +8,7 @@ Customer complaint / support ticketing API (port **5006** by default).
 cp .env.example .env.development
 # In the monorepo, Postgres vars are read from services/payments/.env.development
 # (same POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_PORT).
-# Set POSTGRES_DB=serveaso if empty in payments env.
+# Set POSTGRES_DB=your_db if empty in payments env.
 
 npm install
 npm run dev   # nodemon — restarts on src/ and prisma/ changes
