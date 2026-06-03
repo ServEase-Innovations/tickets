@@ -1,0 +1,10 @@
+# Optional: import in Render or copy Build/Start commands to the dashboard.
+services:
+  - type: web
+    name: tickets
+    runtime: node
+    buildCommand: npm ci && npx prisma generate
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
