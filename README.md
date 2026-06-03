@@ -49,6 +49,17 @@ Legacy SQL reference: `sql/schema.sql`
 | `PRISMA_SKIP_MIGRATE` | `true` to skip startup migrate |
 | `TICKETS_DB_PUSH` | Unused (db push disabled on shared DB); use `prisma:migrate:dev` for schema changes |
 
+## API documentation (Swagger)
+
+| UI | URL |
+|----|-----|
+| **Swagger UI** | `http://localhost:5006/api-docs` |
+| **OpenAPI JSON** | `http://localhost:5006/api-docs.json` |
+
+On Render, open `https://<tickets-host>/api-docs` — the server URL follows the request host (or set `SWAGGER_SERVER_URL` / `RENDER_EXTERNAL_URL`).
+
+Admin **Try it out**: use header `X-Admin-Ticket-Secret` (same value as utils `ADMIN_PUSH_SECRET`). Customer routes need `customerId` in query or body.
+
 ## API
 
 | Audience | Method | Path |
