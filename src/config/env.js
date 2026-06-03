@@ -1,10 +1,7 @@
 import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
-import { createRequire } from "module";
-
-const require = createRequire(import.meta.url);
-const { syncPostgresDbAliases, requirePostgresDatabaseName } = require("../../../../scripts/postgres-env.cjs");
+import { syncPostgresDbAliases, requirePostgresDatabaseName } from "./postgresEnv.js";
 
 const ENV = process.env.NODE_ENV || "development";
 

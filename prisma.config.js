@@ -1,15 +1,22 @@
-import { config as loadDotenv } from "dotenv";
+import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
-import { createRequire } from "module";
 import { defineConfig } from "prisma/config";
-
-const require = createRequire(import.meta.url);
-const { syncPostgresDbAliases, buildDatabaseUrl } = require("../../../scripts/postgres-env.cjs");
+import { syncPostgresDbAliases, buildDatabaseUrl } from "./src/config/postgresEnv.js";
 
 const ENV = process.env.NODE_ENV || "development";
 const root = process.cwd();
 const paymentsDir = path.resolve(root, "../payments");
+
+function loadEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return;
+  const parsed = dotenv.parse(fs.readFileSync(filePath));
+  for (const [key, value] of Object.entries(parsed)) {
+    if (value !== "") {
+      process.env[key] = value;
+    }
+  }
+}
 
 for (const file of [
   path.join(paymentsDir, `.env.${ENV}`),
@@ -17,9 +24,7 @@ for (const file of [
   path.join(root, `.env.${ENV}`),
   path.join(root, ".env"),
 ]) {
-  if (fs.existsSync(file)) {
-    loadDotenv({ path: file });
-  }
+  loadEnvFile(file);
 }
 
 syncPostgresDbAliases(process.env);
