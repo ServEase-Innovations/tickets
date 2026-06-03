@@ -8,20 +8,21 @@ const ENV = process.env.NODE_ENV || "development";
 /** Same value as services/utils/.env.example — local monorepo only. */
 export const DEV_ADMIN_SECRET = "serveaso-test-push-secret";
 
-function loadEnvFile(filePath, { override = false, skipEmpty = false } = {}) {
+/** Never override vars already set by Render / the shell (injected before Node starts). */
+function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return false;
-  if (skipEmpty && override) {
-    const parsed = dotenv.parse(fs.readFileSync(filePath));
-    for (const [key, value] of Object.entries(parsed)) {
-      if (value !== "") {
-        process.env[key] = value;
-      }
-    }
-  } else {
-    dotenv.config({ path: filePath, override });
+  const parsed = dotenv.parse(fs.readFileSync(filePath));
+  let applied = 0;
+  for (const [key, value] of Object.entries(parsed)) {
+    if (value === "") continue;
+    if (process.env[key] !== undefined) continue;
+    process.env[key] = value;
+    applied += 1;
   }
-  console.log("[tickets] loaded env:", filePath);
-  return true;
+  if (applied > 0) {
+    console.log(`[tickets] loaded env (${applied} keys):`, filePath);
+  }
+  return applied > 0;
 }
 
 function resolveAdminSecret() {
@@ -36,24 +37,61 @@ function resolveAdminSecret() {
   return "";
 }
 
-// Same Postgres (and shared vars) as payments — local monorepo dev
+/** Prefer DATABASE_URL (Render) over POSTGRES_DB / DB_NAME. */
+function resolvePostgresConfig() {
+  const url = process.env.DATABASE_URL?.trim();
+  if (url) {
+    try {
+      const u = new URL(url);
+      const database = decodeURIComponent(u.pathname.replace(/^\//, "").split("?")[0] || "");
+      if (database) {
+        if (!process.env.POSTGRES_DB?.trim()) process.env.POSTGRES_DB = database;
+        if (!process.env.DB_NAME?.trim()) process.env.DB_NAME = database;
+        return {
+          host: u.hostname,
+          port: Number(u.port || 5432),
+          user: decodeURIComponent(u.username || ""),
+          password: decodeURIComponent(u.password || ""),
+          database,
+          source: "DATABASE_URL",
+        };
+      }
+    } catch {
+      console.warn("[tickets] DATABASE_URL is set but could not be parsed; using POSTGRES_*");
+    }
+  }
+
+  syncPostgresDbAliases(process.env);
+  const database = requirePostgresDatabaseName(process.env);
+  return {
+    host: process.env.POSTGRES_HOST || process.env.DB_HOST || "127.0.0.1",
+    user: process.env.POSTGRES_USER || process.env.DB_USER,
+    password: process.env.POSTGRES_PASSWORD ?? process.env.DB_PASSWORD ?? "",
+    database,
+    port: Number(process.env.POSTGRES_PORT || process.env.DB_PORT || 5432),
+    source: "POSTGRES_*",
+  };
+}
+
+// Monorepo local dev only (paths missing on Render standalone repo)
 const paymentsDir = path.resolve(process.cwd(), "../payments");
 loadEnvFile(path.resolve(paymentsDir, `.env.${ENV}`));
 loadEnvFile(path.resolve(paymentsDir, ".env"));
 
-// Shared admin push secret (utils .env.example)
 const utilsDir = path.resolve(process.cwd(), "../utils");
 loadEnvFile(path.resolve(utilsDir, `.env.${ENV}`));
 loadEnvFile(path.resolve(utilsDir, ".env"));
 
-// Tickets-specific overrides (PORT, SLA, admin secret)
 let ticketsEnvPath = path.resolve(process.cwd(), `.env.${ENV}`);
 if (!fs.existsSync(ticketsEnvPath)) {
   ticketsEnvPath = path.resolve(process.cwd(), ".env");
 }
-loadEnvFile(ticketsEnvPath, { override: true, skipEmpty: true });
+loadEnvFile(ticketsEnvPath);
 
-syncPostgresDbAliases(process.env);
+const postgres = resolvePostgresConfig();
+console.log(
+  `[tickets] postgres config → ${postgres.host}:${postgres.port}/${postgres.database} (from ${postgres.source})`
+);
 
 export const DEFAULT_SLA_HOURS = Number(process.env.TICKET_DEFAULT_SLA_HOURS) || 48;
 export const DEFAULT_ADMIN_EMAIL =
@@ -72,11 +110,11 @@ export default {
   port: Number(process.env.PORT) || 5006,
   paymentsServiceUrl: getPaymentsServiceUrl(),
   postgres: {
-    host: process.env.POSTGRES_HOST || "127.0.0.1",
-    user: process.env.POSTGRES_USER,
-    password: process.env.POSTGRES_PASSWORD,
-    database: requirePostgresDatabaseName(process.env),
-    port: Number(process.env.POSTGRES_PORT) || 5432,
+    host: postgres.host,
+    user: postgres.user,
+    password: postgres.password,
+    database: postgres.database,
+    port: postgres.port,
     poolMax: Number(process.env.POSTGRES_POOL_MAX) || 10,
     poolIdleTimeoutMs: Number(process.env.POSTGRES_POOL_IDLE_TIMEOUT_MS) || 60_000,
     poolConnectionTimeoutMs:
