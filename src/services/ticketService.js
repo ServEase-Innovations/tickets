@@ -3,7 +3,33 @@ import { DEFAULT_SLA_HOURS, DEFAULT_ADMIN_EMAIL } from "../config/env.js";
 import { notifyCustomerSupportTicketUpdate } from "./notifyCustomer.js";
 import { notifyAdminSupportTicketActivity } from "./notifyAdmin.js";
 
-const STATUSES = ["OPEN", "IN_PROGRESS", "WAITING_CUSTOMER", "RESOLVED", "CLOSED", "CANCELLED"];
+const STATUSES = [
+  "OPEN",
+  "IN_PROGRESS",
+  "WAITING_CUSTOMER",
+  "RESOLUTION_PROVIDED",
+  "PENDING_CUSTOMER_CONFIRMATION",
+  "REOPENED",
+  "RESOLVED",
+  "CLOSED",
+  "CANCELLED",
+];
+
+const TERMINAL_STATUSES = new Set(["CLOSED", "CANCELLED"]);
+
+const AWAITING_CUSTOMER_CONFIRMATION = new Set([
+  "RESOLUTION_PROVIDED",
+  "PENDING_CUSTOMER_CONFIRMATION",
+  "RESOLVED",
+]);
+
+/** Admin PATCH may not set these — use dedicated endpoints / customer actions. */
+const ADMIN_FORBIDDEN_DIRECT_STATUSES = new Set([
+  "CLOSED",
+  "RESOLUTION_PROVIDED",
+  "PENDING_CUSTOMER_CONFIRMATION",
+  "RESOLVED",
+]);
 const PRIORITIES = ["LOW", "MEDIUM", "HIGH"];
 const CATEGORIES = [
   "GENERAL",
@@ -27,9 +53,7 @@ function mapTicket(row) {
   const now = Date.now();
   const due = row.sla_due_at ? new Date(row.sla_due_at).getTime() : null;
   const isOverdue =
-    due != null &&
-    !["RESOLVED", "CLOSED", "CANCELLED"].includes(row.status) &&
-    due < now;
+    due != null && !TERMINAL_STATUSES.has(row.status) && due < now;
 
   return {
     ticket_id: Number(row.ticket_id),
@@ -252,7 +276,7 @@ export async function listAdminTickets({
     clauses.push(`t.assigned_admin_email = $${params.length}`);
   }
   if (overdueOnly === true || overdueOnly === "true") {
-    clauses.push(`t.sla_due_at < NOW() AND t.status NOT IN ('RESOLVED', 'CLOSED', 'CANCELLED')`);
+    clauses.push(`t.sla_due_at < NOW() AND t.status NOT IN ('CLOSED', 'CANCELLED')`);
   }
   if (search) {
     params.push(`%${search}%`);
@@ -287,12 +311,48 @@ export async function getAdminStats() {
       COUNT(*) FILTER (WHERE status = 'OPEN')::int AS open,
       COUNT(*) FILTER (WHERE status = 'IN_PROGRESS')::int AS in_progress,
       COUNT(*) FILTER (WHERE status = 'WAITING_CUSTOMER')::int AS waiting_customer,
+      COUNT(*) FILTER (WHERE status IN ('RESOLUTION_PROVIDED', 'PENDING_CUSTOMER_CONFIRMATION'))::int AS pending_customer_confirmation,
+      COUNT(*) FILTER (WHERE status = 'REOPENED')::int AS reopened,
       COUNT(*) FILTER (WHERE status IN ('RESOLVED', 'CLOSED'))::int AS resolved,
-      COUNT(*) FILTER (WHERE sla_due_at < NOW() AND status NOT IN ('RESOLVED', 'CLOSED', 'CANCELLED'))::int AS overdue,
-      COUNT(*) FILTER (WHERE priority = 'HIGH' AND status NOT IN ('RESOLVED', 'CLOSED', 'CANCELLED'))::int AS high_priority_open
+      COUNT(*) FILTER (WHERE sla_due_at < NOW() AND status NOT IN ('CLOSED', 'CANCELLED'))::int AS overdue,
+      COUNT(*) FILTER (WHERE priority = 'HIGH' AND status NOT IN ('CLOSED', 'CANCELLED'))::int AS high_priority_open
     FROM support_tickets
   `);
   return r.rows[0];
+}
+
+function assertAdminCanSetStatus(nextStatus) {
+  if (ADMIN_FORBIDDEN_DIRECT_STATUSES.has(nextStatus)) {
+    const err = new Error("ADMIN_STATUS_FORBIDDEN");
+    err.code = "ADMIN_STATUS_FORBIDDEN";
+    throw err;
+  }
+}
+
+function assertValidAdminTransition(currentStatus, nextStatus) {
+  if (currentStatus === nextStatus) return;
+  if (TERMINAL_STATUSES.has(currentStatus)) {
+    const err = new Error("INVALID_STATUS_TRANSITION");
+    err.code = "INVALID_STATUS_TRANSITION";
+    throw err;
+  }
+  if (AWAITING_CUSTOMER_CONFIRMATION.has(currentStatus) && nextStatus !== "CANCELLED") {
+    const err = new Error("AWAITING_CUSTOMER_CONFIRMATION");
+    err.code = "AWAITING_CUSTOMER_CONFIRMATION";
+    throw err;
+  }
+  const allowed = {
+    OPEN: new Set(["IN_PROGRESS", "WAITING_CUSTOMER", "CANCELLED"]),
+    IN_PROGRESS: new Set(["OPEN", "WAITING_CUSTOMER", "CANCELLED"]),
+    WAITING_CUSTOMER: new Set(["IN_PROGRESS", "OPEN", "CANCELLED"]),
+    REOPENED: new Set(["IN_PROGRESS", "OPEN", "CANCELLED"]),
+  };
+  const ok = allowed[currentStatus];
+  if (!ok || !ok.has(nextStatus)) {
+    const err = new Error("INVALID_STATUS_TRANSITION");
+    err.code = "INVALID_STATUS_TRANSITION";
+    throw err;
+  }
 }
 
 export async function updateTicketAdmin(ticketId, updates, adminEmail) {
@@ -323,14 +383,16 @@ export async function updateTicketAdmin(ticketId, updates, adminEmail) {
     throw err;
   }
 
+  if (status !== existing.status) {
+    assertAdminCanSetStatus(status);
+    assertValidAdminTransition(existing.status, status);
+  }
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const resolvedAt =
-      ["RESOLVED", "CLOSED"].includes(status) && !existing.resolved_at
-        ? new Date()
-        : existing.resolved_at;
-    const resolvedBy = ["RESOLVED", "CLOSED"].includes(status) ? adminEmail : existing.resolved_by;
+    const resolvedAt = existing.resolved_at;
+    const resolvedBy = existing.resolved_by;
 
     await client.query(
       `UPDATE support_tickets SET
@@ -380,11 +442,7 @@ export async function updateTicketAdmin(ticketId, updates, adminEmail) {
       !existing.assigned_admin_email &&
       String(assigned).trim() !== String(DEFAULT_ADMIN_EMAIL).trim();
     if (statusChanged || notesChanged || newlyAssigned) {
-      const reason = ["RESOLVED", "CLOSED"].includes(status)
-        ? "resolved"
-        : newlyAssigned
-          ? "assigned"
-          : "status_change";
+      const reason = newlyAssigned ? "assigned" : "status_change";
       void notifyCustomerSupportTicketUpdate({
         ticket: updated,
         reason,
@@ -393,6 +451,193 @@ export async function updateTicketAdmin(ticketId, updates, adminEmail) {
           : `Status: ${status.replace(/_/g, " ")}`,
       });
     }
+    return updated;
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Admin documents a resolution and asks the customer to confirm before CLOSED.
+ */
+export async function provideTicketResolution(ticketId, { resolution_notes: resolutionNotes }, adminEmail) {
+  const notes = String(resolutionNotes || "").trim();
+  if (!notes) {
+    const err = new Error("RESOLUTION_NOTES_REQUIRED");
+    err.code = "RESOLUTION_NOTES_REQUIRED";
+    throw err;
+  }
+
+  const existing = await getTicketById(ticketId, { includeInternalComments: true });
+  if (!existing) {
+    const err = new Error("NOT_FOUND");
+    err.code = "NOT_FOUND";
+    throw err;
+  }
+  if (TERMINAL_STATUSES.has(existing.status)) {
+    const err = new Error("INVALID_STATUS_TRANSITION");
+    err.code = "INVALID_STATUS_TRANSITION";
+    throw err;
+  }
+  if (AWAITING_CUSTOMER_CONFIRMATION.has(existing.status)) {
+    const err = new Error("AWAITING_CUSTOMER_CONFIRMATION");
+    err.code = "AWAITING_CUSTOMER_CONFIRMATION";
+    throw err;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `UPDATE support_tickets SET
+        status = 'PENDING_CUSTOMER_CONFIRMATION',
+        resolution_notes = $2,
+        assigned_admin_email = COALESCE(assigned_admin_email, $3),
+        updated_at = NOW()
+       WHERE ticket_id = $1`,
+      [ticketId, notes, adminEmail || null]
+    );
+    await client.query(
+      `INSERT INTO support_ticket_comments (ticket_id, author_type, author_id, author_name, body, is_internal)
+       VALUES ($1, 'ADMIN', NULL, $2, $3, false)`,
+      [ticketId, adminEmail || "Support", notes]
+    );
+    await logEvent(
+      client,
+      ticketId,
+      "RESOLUTION_PROVIDED",
+      { resolution_notes: notes },
+      adminEmail
+    );
+    await client.query("COMMIT");
+    const updated = await getTicketById(ticketId, { includeInternalComments: true });
+    void notifyCustomerSupportTicketUpdate({
+      ticket: updated,
+      reason: "pending_confirmation",
+      preview:
+        "Please confirm whether this resolves your issue, or reopen the ticket if you still need help.",
+    });
+    void notifyAdminSupportTicketActivity({
+      ticket: updated,
+      reason: "resolution_provided",
+      preview: `Awaiting customer confirmation · ${updated.ticket_number}`,
+    });
+    return updated;
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+export async function acceptTicketResolution(ticketId, customerId) {
+  const existing = await getTicketById(ticketId);
+  if (!existing) {
+    const err = new Error("NOT_FOUND");
+    err.code = "NOT_FOUND";
+    throw err;
+  }
+  if (Number(existing.customerid) !== Number(customerId)) {
+    const err = new Error("FORBIDDEN");
+    err.code = "FORBIDDEN";
+    throw err;
+  }
+  if (!AWAITING_CUSTOMER_CONFIRMATION.has(existing.status)) {
+    const err = new Error("NOT_AWAITING_CONFIRMATION");
+    err.code = "NOT_AWAITING_CONFIRMATION";
+    throw err;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `UPDATE support_tickets SET
+        status = 'CLOSED',
+        resolved_at = COALESCE(resolved_at, NOW()),
+        resolved_by = COALESCE(resolved_by, 'customer'),
+        updated_at = NOW()
+       WHERE ticket_id = $1`,
+      [ticketId]
+    );
+    await client.query(
+      `INSERT INTO support_ticket_comments (ticket_id, author_type, author_id, author_name, body, is_internal)
+       VALUES ($1, 'CUSTOMER', $2, 'Customer', $3, false)`,
+      [ticketId, customerId, "Customer confirmed the issue is resolved."]
+    );
+    await logEvent(client, ticketId, "CUSTOMER_ACCEPTED", {}, String(customerId));
+    await client.query("COMMIT");
+    const updated = await getTicketById(ticketId);
+    void notifyAdminSupportTicketActivity({
+      ticket: updated,
+      reason: "customer_accepted",
+      preview: `Customer accepted resolution · ${updated.ticket_number}`,
+    });
+    return updated;
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+export async function reopenTicket(ticketId, customerId, { body } = {}) {
+  const existing = await getTicketById(ticketId);
+  if (!existing) {
+    const err = new Error("NOT_FOUND");
+    err.code = "NOT_FOUND";
+    throw err;
+  }
+  if (Number(existing.customerid) !== Number(customerId)) {
+    const err = new Error("FORBIDDEN");
+    err.code = "FORBIDDEN";
+    throw err;
+  }
+  if (!AWAITING_CUSTOMER_CONFIRMATION.has(existing.status)) {
+    const err = new Error("NOT_AWAITING_CONFIRMATION");
+    err.code = "NOT_AWAITING_CONFIRMATION";
+    throw err;
+  }
+
+  const message =
+    String(body || "").trim() ||
+    "Customer indicated the issue is not fully resolved and reopened the ticket.";
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `UPDATE support_tickets SET
+        status = 'REOPENED',
+        resolved_at = NULL,
+        resolved_by = NULL,
+        updated_at = NOW()
+       WHERE ticket_id = $1`,
+      [ticketId]
+    );
+    await client.query(
+      `INSERT INTO support_ticket_comments (ticket_id, author_type, author_id, author_name, body, is_internal)
+       VALUES ($1, 'CUSTOMER', $2, 'Customer', $3, false)`,
+      [ticketId, customerId, message]
+    );
+    await logEvent(client, ticketId, "CUSTOMER_REOPENED", { body: message }, String(customerId));
+    await client.query("COMMIT");
+    const updated = await getTicketById(ticketId);
+    void notifyAdminSupportTicketActivity({
+      ticket: updated,
+      reason: "customer_reopened",
+      preview: message.slice(0, 240),
+    });
+    void notifyCustomerSupportTicketUpdate({
+      ticket: updated,
+      reason: "status_change",
+      preview: "Your ticket was reopened. Our team will follow up shortly.",
+    });
     return updated;
   } catch (e) {
     await client.query("ROLLBACK");
@@ -421,6 +666,15 @@ export async function addComment({
     err.code = "NOT_FOUND";
     throw err;
   }
+  if (
+    authorType === "CUSTOMER" &&
+    !isInternal &&
+    AWAITING_CUSTOMER_CONFIRMATION.has(ticket.status)
+  ) {
+    const err = new Error("USE_REOPEN_ACTION");
+    err.code = "USE_REOPEN_ACTION";
+    throw err;
+  }
   await pool.query(
     `INSERT INTO support_ticket_comments (ticket_id, author_type, author_id, author_name, body, is_internal)
      VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -429,7 +683,9 @@ export async function addComment({
   if (authorType === "ADMIN" && !isInternal) {
     await pool.query(
       `UPDATE support_tickets SET status = 'WAITING_CUSTOMER', updated_at = NOW()
-       WHERE ticket_id = $1 AND status NOT IN ('RESOLVED', 'CLOSED', 'CANCELLED', 'WAITING_CUSTOMER')`,
+       WHERE ticket_id = $1
+         AND status NOT IN ('CLOSED', 'CANCELLED', 'WAITING_CUSTOMER')
+         AND status NOT IN ('RESOLUTION_PROVIDED', 'PENDING_CUSTOMER_CONFIRMATION', 'RESOLVED')`,
       [ticketId]
     );
   }

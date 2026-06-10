@@ -22,7 +22,17 @@ CREATE TABLE IF NOT EXISTS public.support_tickets (
   created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
   CONSTRAINT support_tickets_status_check CHECK (
-    status IN ('OPEN', 'IN_PROGRESS', 'WAITING_CUSTOMER', 'RESOLVED', 'CLOSED', 'CANCELLED')
+    status IN (
+      'OPEN',
+      'IN_PROGRESS',
+      'WAITING_CUSTOMER',
+      'RESOLUTION_PROVIDED',
+      'PENDING_CUSTOMER_CONFIRMATION',
+      'REOPENED',
+      'RESOLVED',
+      'CLOSED',
+      'CANCELLED'
+    )
   ),
   CONSTRAINT support_tickets_priority_check CHECK (
     priority IN ('LOW', 'MEDIUM', 'HIGH')

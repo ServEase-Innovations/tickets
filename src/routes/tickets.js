@@ -4,8 +4,11 @@ import {
   getTicketById,
   listCustomerTickets,
   addComment,
+  acceptTicketResolution,
+  reopenTicket,
   CATEGORIES,
   PRIORITIES,
+  STATUSES,
   DEFAULT_SLA_HOURS,
 } from "../services/ticketService.js";
 
@@ -28,7 +31,7 @@ router.get("/meta", (_req, res) => {
     categories: CATEGORIES,
     priorities: PRIORITIES,
     default_sla_hours: DEFAULT_SLA_HOURS,
-    statuses: ["OPEN", "IN_PROGRESS", "WAITING_CUSTOMER", "RESOLVED", "CLOSED", "CANCELLED"],
+    statuses: STATUSES,
   });
 });
 
@@ -111,6 +114,52 @@ router.get("/:ticketId", async (req, res) => {
     return res.json({ success: true, ticket });
   } catch (e) {
     return res.status(500).json({ success: false, error: "SERVER_ERROR" });
+  }
+});
+
+router.post("/:ticketId/accept-resolution", async (req, res) => {
+  try {
+    const customerId = parseCustomerId(req);
+    const ticketId = Number(req.params.ticketId);
+    if (!customerId) {
+      return res.status(400).json({ success: false, error: "CUSTOMER_ID_REQUIRED" });
+    }
+    const ticket = await acceptTicketResolution(ticketId, customerId);
+    return res.json({ success: true, ticket });
+  } catch (e) {
+    const code = e.code || "SERVER_ERROR";
+    const status =
+      code === "NOT_FOUND"
+        ? 404
+        : code === "FORBIDDEN"
+          ? 403
+          : code === "NOT_AWAITING_CONFIRMATION"
+            ? 400
+            : 500;
+    return res.status(status).json({ success: false, error: code });
+  }
+});
+
+router.post("/:ticketId/reopen", async (req, res) => {
+  try {
+    const customerId = parseCustomerId(req);
+    const ticketId = Number(req.params.ticketId);
+    if (!customerId) {
+      return res.status(400).json({ success: false, error: "CUSTOMER_ID_REQUIRED" });
+    }
+    const ticket = await reopenTicket(ticketId, customerId, { body: req.body?.body });
+    return res.json({ success: true, ticket });
+  } catch (e) {
+    const code = e.code || "SERVER_ERROR";
+    const status =
+      code === "NOT_FOUND"
+        ? 404
+        : code === "FORBIDDEN"
+          ? 403
+          : code === "NOT_AWAITING_CONFIRMATION"
+            ? 400
+            : 500;
+    return res.status(status).json({ success: false, error: code });
   }
 });
 

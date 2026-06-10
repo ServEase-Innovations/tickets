@@ -4,6 +4,7 @@ import {
   listAdminTickets,
   getTicketById,
   updateTicketAdmin,
+  provideTicketResolution,
   addComment,
   getAdminStats,
   STATUSES,
@@ -14,6 +15,19 @@ import {
 
 const router = Router();
 router.use(adminAuth);
+
+function ticketRouteError(res, e) {
+  if (e?.code === "23514") {
+    res.status(503).json({
+      success: false,
+      error: "SCHEMA_MIGRATION_REQUIRED",
+      message:
+        "Ticket status constraint is outdated. From repo root run: cd database && npm run migrate:tickets",
+    });
+    return null;
+  }
+  return { code: e?.code || "SERVER_ERROR" };
+}
 
 router.get("/stats", async (_req, res) => {
   try {
@@ -64,6 +78,30 @@ router.get("/:ticketId", async (req, res) => {
   }
 });
 
+router.post("/:ticketId/provide-resolution", async (req, res) => {
+  try {
+    const ticket = await provideTicketResolution(
+      Number(req.params.ticketId),
+      { resolution_notes: req.body.resolution_notes },
+      req.adminEmail
+    );
+    res.json({ success: true, ticket });
+  } catch (e) {
+    const mapped = ticketRouteError(res, e);
+    if (mapped === null) return;
+    const { code } = mapped;
+    res.status(
+      code === "NOT_FOUND"
+        ? 404
+        : code === "RESOLUTION_NOTES_REQUIRED" ||
+            code === "INVALID_STATUS_TRANSITION" ||
+            code === "AWAITING_CUSTOMER_CONFIRMATION"
+          ? 400
+          : 500
+    ).json({ success: false, error: code, message: e.message });
+  }
+});
+
 router.patch("/:ticketId", async (req, res) => {
   try {
     const ticket = await updateTicketAdmin(
@@ -79,10 +117,21 @@ router.patch("/:ticketId", async (req, res) => {
     );
     res.json({ success: true, ticket });
   } catch (e) {
-    const code = e.code || "SERVER_ERROR";
-    res.status(code === "NOT_FOUND" ? 404 : code.startsWith("INVALID") ? 400 : 500).json({
+    const mapped = ticketRouteError(res, e);
+    if (mapped === null) return;
+    const { code } = mapped;
+    res.status(
+      code === "NOT_FOUND"
+        ? 404
+        : code.startsWith("INVALID") ||
+            code === "ADMIN_STATUS_FORBIDDEN" ||
+            code === "AWAITING_CUSTOMER_CONFIRMATION"
+          ? 400
+          : 500
+    ).json({
       success: false,
       error: code,
+      message: e.message,
     });
   }
 });

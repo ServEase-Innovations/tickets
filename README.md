@@ -69,15 +69,20 @@ Admin **Try it out**: use header `X-Admin-Ticket-Secret` (same value as utils `A
 | Customer | GET | `/api/tickets/mine?customerId=` |
 | Customer | GET | `/api/tickets/:id?customerId=` |
 | Customer | POST | `/api/tickets/:id/comments` |
+| Customer | POST | `/api/tickets/:id/accept-resolution` — closes ticket after customer confirms |
+| Customer | POST | `/api/tickets/:id/reopen` — body: `body?` — customer rejects resolution |
 | Admin | GET | `/api/admin/tickets/stats` |
 | Admin | GET | `/api/admin/tickets` |
-| Admin | PATCH | `/api/admin/tickets/:id` — `status`, `priority`, `sla_hours`, `assigned_admin_email`, `resolution_notes` |
+| Admin | PATCH | `/api/admin/tickets/:id` — `status`, `priority`, `sla_hours`, `assigned_admin_email` (not `CLOSED`) |
+| Admin | POST | `/api/admin/tickets/:id/provide-resolution` — `resolution_notes` → `PENDING_CUSTOMER_CONFIRMATION` |
 | Admin | POST | `/api/admin/tickets/:id/comments` — `body`, `is_internal?` |
 
 Admin auth: headers `X-Admin-Ticket-Secret` (or `X-Admin-Push-Secret`) and optional `X-Admin-Email`.
 
 ## Business rules
 
+- **Resolution workflow:** `OPEN` → `IN_PROGRESS` → admin **Provide resolution** → `PENDING_CUSTOMER_CONFIRMATION` → customer **Accept** → `CLOSED`, or customer **Reopen** → `REOPENED` → `IN_PROGRESS`.
+- Admins cannot set `CLOSED` directly; only the customer accept action closes the ticket.
 - New tickets: status `OPEN`, priority `MEDIUM`, SLA **48 hours** (configurable via `TICKET_DEFAULT_SLA_HOURS`).
 - Assigned to `DEFAULT_TICKET_ADMIN_EMAIL` (default `admin@serveaso.com`).
 - Admin can set priority `LOW` / `MEDIUM` / `HIGH` and extend SLA hours (recalculates `sla_due_at` from `created_at`).

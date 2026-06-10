@@ -32,6 +32,7 @@ export async function notifyCustomerSupportTicketUpdate({
     admin_reply: "Reply on your support ticket",
     status_change: "Support ticket updated",
     resolved: "Your support ticket was resolved",
+    pending_confirmation: "Please confirm your support ticket resolution",
     assigned: "Support team is reviewing your ticket",
   };
 
@@ -47,6 +48,9 @@ export async function notifyCustomerSupportTicketUpdate({
     ticket_number: ticket.ticket_number,
     reason,
     status: ticket.status,
+    ...(reason === "pending_confirmation"
+      ? { action: "confirm_resolution" }
+      : {}),
   };
 
   const payload = {
